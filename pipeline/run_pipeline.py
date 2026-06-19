@@ -23,6 +23,7 @@ import torch
 import numpy as np
 from collections import defaultdict
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 
 # Allow importing sibling modules
 sys.path.insert(0, str(Path(__file__).parent))
@@ -53,30 +54,40 @@ def load_model(weights: str, device: str):
     return model, non_max_suppression
 
 
-def preprocess(frame, img_size=640, device="cpu"):
+def _preprocess_single(frame, img_size=640):
     img = cv2.resize(frame, (img_size, img_size))
     img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR→RGB, HWC→CHW
     img = np.ascontiguousarray(img)
-    img = torch.from_numpy(img).float().to(device) / 255.0
-    return img.unsqueeze(0)
+    return torch.from_numpy(img).float() / 255.0
 
 
-def infer_frame(model, nms_fn, frame, conf_thres=0.4, iou_thres=0.45,
+def infer_batch(model, nms_fn, frames, conf_thres=0.4, iou_thres=0.45,
                 img_size=640, device="cpu"):
-    tensor = preprocess(frame, img_size, device)
-    with torch.no_grad():
-        pred = model(tensor)[0]
-    pred = nms_fn(pred, conf_thres, iou_thres)[0]
+    """Run one GPU forward pass for all non-None frames; returns per-cam det lists."""
+    valid_idx = [i for i, f in enumerate(frames) if f is not None]
+    if not valid_idx:
+        return [None] * len(frames)
 
-    detections = []
-    if pred is not None and len(pred):
-        for *xyxy, conf, cls in pred.cpu().numpy():
-            detections.append({
-                "class_id":   int(cls),
-                "confidence": float(conf),
-                "bbox":       [float(v) for v in xyxy],
-            })
-    return detections
+    tensors = [_preprocess_single(frames[i], img_size) for i in valid_idx]
+    batch = torch.stack(tensors).to(device)  # [N, 3, H, W]
+
+    with torch.no_grad():
+        preds = model(batch)[0]  # [N, anchors, 5+nc]
+    preds = nms_fn(preds, conf_thres, iou_thres)  # list of N tensors
+
+    per_cam = [None] * len(frames)
+    for out_i, cam_i in enumerate(valid_idx):
+        pred = preds[out_i]
+        dets = []
+        if pred is not None and len(pred):
+            for *xyxy, conf, cls in pred.cpu().numpy():
+                dets.append({
+                    "class_id":   int(cls),
+                    "confidence": float(conf),
+                    "bbox":       [float(v) for v in xyxy],
+                })
+        per_cam[cam_i] = dets
+    return per_cam
 
 
 def open_videos(video_paths):
@@ -91,15 +102,15 @@ def open_videos(video_paths):
     return caps
 
 
-def read_frames(caps):
-    frames = []
-    for cap in caps:
-        if cap is None:
-            frames.append(None)
-            continue
-        ret, frame = cap.read()
-        frames.append(frame if ret else None)
-    return frames
+def _read_one(cap):
+    if cap is None:
+        return None
+    ret, frame = cap.read()
+    return frame if ret else None
+
+
+def read_frames(caps, executor):
+    return list(executor.map(_read_one, caps))
 
 
 def video_duration(video_paths):
@@ -144,42 +155,36 @@ def main():
     t_start = time.time()
     frame_idx = 0
 
-    while True:
-        frames = read_frames(caps)
-        if all(f is None for f in frames):
-            break
+    with ThreadPoolExecutor(max_workers=len(caps)) as executor:
+        while True:
+            frames = read_frames(caps, executor)
+            if all(f is None for f in frames):
+                break
 
-        if frame_idx % args.skip != 0:
+            if frame_idx % args.skip != 0:
+                frame_idx += 1
+                continue
+
+            per_cam_dets = infer_batch(model, nms_fn, frames,
+                                       args.conf, args.iou, args.img_size, device)
+
+            fused_counts = fuse(per_cam_dets)
+
+            flat_dets = [
+                {"class_id": cls_id, "confidence": 1.0, "bbox": []}
+                for cls_id, cnt in fused_counts.items()
+                for _ in range(cnt)
+            ]
+
+            new_events = detector.update(flat_dets)
+            if new_events:
+                for ev in new_events:
+                    print(f"  [Frame {frame_idx}] {ev.class_name}: {ev.action} "
+                          f"({ev.before}→{ev.after})")
+
             frame_idx += 1
-            continue
 
-        per_cam_dets = []
-        for frame in frames:
-            if frame is None:
-                per_cam_dets.append(None)
-            else:
-                dets = infer_frame(model, nms_fn, frame,
-                                   args.conf, args.iou, args.img_size, device)
-                per_cam_dets.append(dets)
-
-        fused_counts = fuse(per_cam_dets)
-
-        # Convert fused counts back to flat detection list for EventDetector
-        flat_dets = [
-            {"class_id": cls_id, "confidence": 1.0, "bbox": []}
-            for cls_id, cnt in fused_counts.items()
-            for _ in range(cnt)
-        ]
-
-        new_events = detector.update(flat_dets)
-        if new_events:
-            for ev in new_events:
-                print(f"  [Frame {frame_idx}] {ev.class_name}: {ev.action} "
-                      f"({ev.before}→{ev.after})")
-
-        frame_idx += 1
-
-    for cap in caps:
+    for cap in caps:  # executor already closed by 'with' block
         if cap:
             cap.release()
 
