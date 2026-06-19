@@ -13,7 +13,7 @@ PYTHONPATH=~/yolov7 python ~/REDRED/pipeline/run_pipeline.py \
         ~/Dataset/4.TestVideo_Sample/cam4/Sample_1.mp4 \
     --weights ~/Dataset/yolov7_custom.pt \
     --names  ~/Dataset/names.txt \
-    --prices ~/REDRED/data/prices_template.csv \
+    --prices ~/REDRED/data/prices.csv \
     --out    $OUT \
     --device 0 \
     --skip   $SKIP
