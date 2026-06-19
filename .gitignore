@@ -1,0 +1,9 @@
+captures/
+*.pyc
+__pycache__/
+*.pt
+*.tar
+*.zip
+runs/
+*.egg-info/
+.env*
