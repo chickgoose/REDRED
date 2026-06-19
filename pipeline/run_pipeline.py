@@ -23,7 +23,6 @@ import torch
 import numpy as np
 from collections import defaultdict
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor
 
 # Allow importing sibling modules
 sys.path.insert(0, str(Path(__file__).parent))
@@ -102,15 +101,24 @@ def open_videos(video_paths):
     return caps
 
 
-def _read_one(cap):
-    if cap is None:
-        return None
-    ret, frame = cap.read()
-    return frame if ret else None
+def read_frames(caps):
+    frames = []
+    for cap in caps:
+        if cap is None:
+            frames.append(None)
+            continue
+        ret, frame = cap.read()
+        frames.append(frame if ret else None)
+    return frames
 
 
-def read_frames(caps, executor):
-    return list(executor.map(_read_one, caps))
+def grab_frames(caps):
+    """Advance all caps by one position without decoding (skip frames fast)."""
+    alive = False
+    for cap in caps:
+        if cap is not None:
+            alive = cap.grab() or alive
+    return alive
 
 
 def video_duration(video_paths):
@@ -155,36 +163,37 @@ def main():
     t_start = time.time()
     frame_idx = 0
 
-    with ThreadPoolExecutor(max_workers=len(caps)) as executor:
-        while True:
-            frames = read_frames(caps, executor)
-            if all(f is None for f in frames):
+    while True:
+        # Decode only the frames we'll actually process
+        frames = read_frames(caps)
+        if all(f is None for f in frames):
+            break
+
+        per_cam_dets = infer_batch(model, nms_fn, frames,
+                                   args.conf, args.iou, args.img_size, device)
+
+        fused_counts = fuse(per_cam_dets)
+
+        flat_dets = [
+            {"class_id": cls_id, "confidence": 1.0, "bbox": []}
+            for cls_id, cnt in fused_counts.items()
+            for _ in range(cnt)
+        ]
+
+        new_events = detector.update(flat_dets)
+        if new_events:
+            for ev in new_events:
+                print(f"  [Frame {frame_idx}] {ev.class_name}: {ev.action} "
+                      f"({ev.before}→{ev.after})")
+
+        frame_idx += args.skip
+
+        # Skip next (skip-1) frames without decoding using grab()
+        for _ in range(args.skip - 1):
+            if not grab_frames(caps):
                 break
 
-            if frame_idx % args.skip != 0:
-                frame_idx += 1
-                continue
-
-            per_cam_dets = infer_batch(model, nms_fn, frames,
-                                       args.conf, args.iou, args.img_size, device)
-
-            fused_counts = fuse(per_cam_dets)
-
-            flat_dets = [
-                {"class_id": cls_id, "confidence": 1.0, "bbox": []}
-                for cls_id, cnt in fused_counts.items()
-                for _ in range(cnt)
-            ]
-
-            new_events = detector.update(flat_dets)
-            if new_events:
-                for ev in new_events:
-                    print(f"  [Frame {frame_idx}] {ev.class_name}: {ev.action} "
-                          f"({ev.before}→{ev.after})")
-
-            frame_idx += 1
-
-    for cap in caps:  # executor already closed by 'with' block
+    for cap in caps:
         if cap:
             cap.release()
 
