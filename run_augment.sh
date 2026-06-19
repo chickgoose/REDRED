@@ -8,6 +8,7 @@ python ~/REDRED/augment/cut_paste_aug.py \
     --bg_dir   ~/Dataset/3.Background_Images \
     --out_dir  ~/Dataset/augmented \
     --num_images $NUM \
-    --max_objects 4
+    --max_objects 4 \
+    --no_erasing
 
 echo "Done: $NUM augmented images -> ~/Dataset/augmented"

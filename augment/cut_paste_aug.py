@@ -86,14 +86,18 @@ def random_color_jitter(img):
 def make_mask(img):
     """Extract foreground mask from segmentation image.
 
-    흰 배경(>240) 또는 PNG alpha 채널 기준으로 전경 마스크 추출.
+    흰 배경(>230) 기준으로 마스크 추출 후 경계 침식으로 halo 제거.
     """
     if img.shape[2] == 4:
-        return img[:, :, 3]
+        mask = img[:, :, 3]
+        kernel = np.ones((2, 2), np.uint8)
+        return cv2.erode(mask, kernel, iterations=1)
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    _, mask = cv2.threshold(gray, 240, 255, cv2.THRESH_BINARY_INV)
+    _, mask = cv2.threshold(gray, 230, 255, cv2.THRESH_BINARY_INV)
     kernel = np.ones((3, 3), np.uint8)
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+    # 경계 1픽셀 침식으로 흰 테두리(halo) 제거
+    mask = cv2.erode(mask, kernel, iterations=1)
     return mask
 
 
@@ -272,7 +276,7 @@ def augment_one(
     max_scale=0.45,
     use_hflip=True,
     use_perspective=True,
-    use_erasing=True,
+    use_erasing=False,
     use_blur_noise=True,
 ):
     bg_path = random.choice(bg_paths)
@@ -304,10 +308,7 @@ def augment_one(
         seg_bgr = cv2.resize(seg_bgr, (new_w, new_h))
         mask    = cv2.resize(mask,    (new_w, new_h))
 
-        angle = random.uniform(-15, 15)
-        M = cv2.getRotationMatrix2D((new_w / 2, new_h / 2), angle, 1.0)
-        seg_bgr = cv2.warpAffine(seg_bgr, M, (new_w, new_h))
-        mask    = cv2.warpAffine(mask,    M, (new_w, new_h))
+        # 회전 제거: 무인판매대 상품은 항상 정방향이므로 rotation 불필요
 
         seg_bgr = random_color_jitter(seg_bgr)
 
