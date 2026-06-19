@@ -37,13 +37,14 @@ def load_names(names_path: str):
 
 
 def load_model(weights: str, device: str):
-    """Load YOLOv7 via torch.hub or direct import."""
-    sys.path.insert(0, str(Path(weights).parent.parent.parent))  # yolov7 root
-    from models.experimental import attempt_load
+    """Load YOLOv7 directly via torch.load (bypasses attempt_download)."""
+    yolov7_root = str(Path.home() / "yolov7")
+    sys.path.insert(0, yolov7_root)
     from utils.general import non_max_suppression
 
-    model = attempt_load(weights, map_location=device)
-    model.eval()
+    import torch
+    ckpt = torch.load(weights, map_location=device)
+    model = (ckpt.get("ema") or ckpt["model"]).float().fuse().eval()
     return model, non_max_suppression
 
 
