@@ -308,7 +308,10 @@ def augment_one(
         seg_bgr = cv2.resize(seg_bgr, (new_w, new_h))
         mask    = cv2.resize(mask,    (new_w, new_h))
 
-        # 회전 제거: 무인판매대 상품은 항상 정방향이므로 rotation 불필요
+        angle = random.uniform(-5, 5)  # ±15→±5: 선반 상품은 소폭 기울임만 현실적
+        M = cv2.getRotationMatrix2D((new_w / 2, new_h / 2), angle, 1.0)
+        seg_bgr = cv2.warpAffine(seg_bgr, M, (new_w, new_h))
+        mask    = cv2.warpAffine(mask,    M, (new_w, new_h))
 
         seg_bgr = random_color_jitter(seg_bgr)
 
