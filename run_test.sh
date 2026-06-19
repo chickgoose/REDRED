@@ -1,0 +1,2 @@
+#!/bin/bash
+python ~/REDRED/pipeline/run_pipeline.py --videos ~/Dataset/4.TestVideo_Sample/cam0/Sample_1.mp4 ~/Dataset/4.TestVideo_Sample/cam1/Sample_1.mp4 ~/Dataset/4.TestVideo_Sample/cam2/Sample_1.mp4 ~/Dataset/4.TestVideo_Sample/cam3/Sample_1.mp4 ~/Dataset/4.TestVideo_Sample/cam4/Sample_1.mp4 --weights ~/Dataset/yolov7_custom.pt --names ~/Dataset/names.txt --prices ~/REDRED/data/prices_template.csv --out ~/REDRED/output/submission.csv --device 0
