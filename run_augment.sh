@@ -4,7 +4,7 @@
 NUM=${1:-5000}
 
 python ~/REDRED/augment/cut_paste_aug.py \
-    --seg_dir  ~/Dataset/2.backsub_images_100 \
+    --seg_dir  ~/Dataset/3.background_substracted_white \
     --bg_dir   ~/Dataset/3.Background_Images \
     --out_dir  ~/Dataset/augmented \
     --num_images $NUM \

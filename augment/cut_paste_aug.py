@@ -41,15 +41,21 @@ import numpy as np
 def load_seg_images(seg_dir):
     """Build {class_id: [img_path, ...]} from segmentation directory.
 
-    Expected layout: seg_dir/<class_name>/*.png  (or *.jpg)
-    class_id는 디렉토리 정렬 순서 기준 (names.txt와 동일하게 맞춰야 함).
+    두 가지 레이아웃 지원:
+      1. seg_dir/<N>.<class_name>/  → 폴더명 앞 숫자를 class_id로 사용
+      2. seg_dir/<class_name>/      → 정렬 순서를 class_id로 사용
     """
     class_dirs = sorted([
         d for d in glob.glob(os.path.join(seg_dir, "*"))
         if os.path.isdir(d)
     ])
     seg_map = {}
-    for class_id, d in enumerate(class_dirs):
+    for idx, d in enumerate(class_dirs):
+        basename = os.path.basename(d)
+        try:
+            class_id = int(basename.split(".")[0])
+        except ValueError:
+            class_id = idx
         paths = glob.glob(os.path.join(d, "*.png")) + glob.glob(os.path.join(d, "*.jpg"))
         if paths:
             seg_map[class_id] = paths
