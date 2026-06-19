@@ -43,8 +43,13 @@ def load_model(weights: str, device: str):
     from utils.general import non_max_suppression
 
     import torch
+    import torch.nn as nn
     ckpt = torch.load(weights, map_location=device)
     model = (ckpt.get("ema") or ckpt["model"]).float().fuse().eval()
+    # PyTorch 1.12+ compatibility fix
+    for m in model.modules():
+        if isinstance(m, nn.Upsample):
+            m.recompute_scale_factor = None
     return model, non_max_suppression
 
 
